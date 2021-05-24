@@ -16,10 +16,14 @@ contract Hospital is ERC20, Ownable {
     event WithdrawRequested(address indexed withdrawer, uint indexed amount);
     event WithdrawFinished(address indexed withdrawer, uint indexed amount);
     
+    enum VaccineName { SINOVAC, ASTRAZENECA, PFIZER }
     struct Passport {
         uint issueDate;
         uint expiryDate;
+        VaccineName vaccineUsed;
+        uint lotNumber;
         bool isValid;
+        bool isPaid;
     }
     
     struct Claim {
@@ -48,6 +52,10 @@ contract Hospital is ERC20, Ownable {
         isGoingToWithdraw = false;
         withdrawAmount = 0;
     }
+    
+    function getVaccineName() external view returns (VaccineName, VaccineName, VaccineName) {
+        return (VaccineName.SINOVAC, VaccineName.ASTRAZENECA, VaccineName.PFIZER);
+    }
 
     // Passport
     function passportOf(address patient) external view returns (uint issueDate, uint expiryDate, bool isValid) {
@@ -55,8 +63,8 @@ contract Hospital is ERC20, Ownable {
         return (passport.issueDate, passport.expiryDate, passport.isValid);
     }
     
-    function issuePassport(address patient) external onlyOwner {
-        Passport memory newPassport = Passport(block.timestamp, block.timestamp.add(90*DAY), false);
+    function issuePassport(address patient, VaccineName vaccineUsed, uint lotNumber_) external onlyOwner {
+        Passport memory newPassport = Passport(block.timestamp, block.timestamp.add(90*DAY), vaccineUsed, lotNumber_, false, false);
         _passports[patient] = newPassport;
         emit PassportIssued(owner(), patient);
     }
@@ -113,7 +121,6 @@ contract Hospital is ERC20, Ownable {
         claim.isClaimed = true;
         Passport storage passport = _passports[msg.sender];
         passport.isValid = false;
-        passport.issueDate = 0;
         uint fromReserves = price.mul(50).div(100);
         require(fromReserves <= reserves, "insufficient reserves");
         require(claim.amount <= totalBNB(), "insufficient pool value");
@@ -127,10 +134,11 @@ contract Hospital is ERC20, Ownable {
         require(msg.value == price, "incorrect value");
         Passport storage passport = _passports[payee];
         require(passport.issueDate > 0, "passport doesn't exist");
-        require(passport.isValid == false, "passport already paid");
+        require(passport.isPaid == false, "passport already paid");
         uint toReserves = msg.value.mul(50).div(100);   // 50% goes to hospital, 50% goes to pool
         reserves = reserves.add(toReserves);
         passport.isValid = true;
+        passport.isPaid = true;
     }
     
     // Pool
@@ -142,7 +150,6 @@ contract Hospital is ERC20, Ownable {
         uint total = totalBNB().sub(msg.value);
         uint share = total == 0 ? msg.value : msg.value.mul(totalSupply()).div(total);
         _mint(msg.sender, share);
-        require(totalSupply() >= 1e17, 'deposit: total supply too low');
     }
 
     function withdraw(uint share) external {
@@ -150,6 +157,5 @@ contract Hospital is ERC20, Ownable {
         _burn(msg.sender, share);
         SafeToken.safeTransferBNB(msg.sender, amount);
         uint supply = totalSupply();
-        require(supply == 0 || supply >= 1e17, 'withdraw: total supply too low');
     }
 }
